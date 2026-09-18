@@ -14,13 +14,37 @@ const otpRoutes = require('./routes/otpRoutes');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
-app.use(cors());
+// ============================================================
+// MIDDLEWARE
+// ============================================================
+app.use(cors({
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://ecocharge-hub.web.app',
+    'https://ecocharge-hub.firebaseapp.com',
+    'https://ecochargehub.vercel.app',
+    'https://*.web.app',
+    'https://*.firebaseapp.com'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());
 
 // ============================================================
 // TEST ROUTES
 // ============================================================
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'EcoChargeHub Backend is running',
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.get('/api/test', (req, res) => {
   res.json({ success: true, message: 'API is working!' });
 });
@@ -40,6 +64,14 @@ app.get('/api/firebase-test', async (req, res) => {
 // REGISTER ROUTES
 // ============================================================
 app.use('/api/otp', otpRoutes);
+
+// ============================================================
+// ERROR HANDLING
+// ============================================================
+app.use((err, req, res, next) => {
+  console.error('Server error:', err);
+  res.status(500).json({ error: err.message || 'Internal server error' });
+});
 
 // ============================================================
 // START SERVER
