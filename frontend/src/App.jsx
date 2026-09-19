@@ -1,4 +1,3 @@
-import OtpLogin from './pages/OtpLogin';
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
@@ -10,6 +9,7 @@ import About from './pages/About';
 import Stations from './pages/Stations';
 import StationDetails from './pages/StationDetails';
 import Login from './pages/Login';
+import EmailLinkLogin from './pages/EmailLinkLogin';
 import OwnerLogin from './pages/OwnerLogin';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
@@ -28,18 +28,17 @@ function App() {
         <Navbar />
         <main>
           <Routes>
-            
             {/* ============ PUBLIC ROUTES ============ */}
             <Route path="/" element={<Home />} />
             <Route path="/about" element={<About />} />
             <Route path="/stations" element={<Stations />} />
             <Route path="/stations/:id" element={<StationDetails />} />
             <Route path="/login" element={<Login />} />
-            <Route path="/otp-login" element={<OtpLogin />} />      {/* ← NEW */}
+            <Route path="/email-link-login" element={<EmailLinkLogin />} />
             <Route path="/owner-login" element={<OwnerLogin />} />
             <Route path="/register" element={<Register />} />
 
-            {/* ============ PROTECTED ROUTES (any logged-in user) ============ */}
+            {/* ============ PROTECTED ROUTES ============ */}
             <Route
               path="/dashboard"
               element={

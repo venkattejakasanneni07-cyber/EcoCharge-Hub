@@ -85,7 +85,7 @@ const Login = () => {
             Don't have an account? <Link to="/register">Register as User</Link>
           </p>
           <p className="otp-link">
-            🔐 Or <Link to="/otp-login">Login with Email OTP</Link> (no password)
+            🔗 Or <Link to="/email-link-login">Login with Email Link</Link> (no password)
           </p>
           <p className="owner-link">
             Are you a Station Owner? <Link to="/owner-login">Login Here</Link>
