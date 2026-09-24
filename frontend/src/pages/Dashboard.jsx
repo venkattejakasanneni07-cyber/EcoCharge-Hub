@@ -7,36 +7,45 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
 
 const Dashboard = () => {
   const { user } = useAuth();
-  const [stats, setStats] = useState({ sessions: 0, spent: 0, energy: 0, co2: 0 });
+  const [stats, setStats] = useState({ bookings: 0, spent: 0, energy: 0, co2: 0 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchStats = async () => {
       if (!user) return;
       try {
-        const sessionQ = query(collection(db, 'chargingSessions'), where('userId', '==', user.uid));
-        const sessionSnapshot = await getDocs(sessionQ);
-        let totalSessions = 0, totalSpent = 0, totalEnergy = 0, totalCo2 = 0;
-        sessionSnapshot.forEach((doc) => {
+        // Fetch user's bookings
+        const bookingQ = query(
+          collection(db, 'bookings'),
+          where('userId', '==', user.uid)
+        );
+        const bookingSnapshot = await getDocs(bookingQ);
+
+        let totalBookings = 0;
+        let totalSpent = 0;
+
+        bookingSnapshot.forEach((doc) => {
           const data = doc.data();
-          totalSessions++;
-          totalSpent += data.amount || 0;
-          totalEnergy += data.energyConsumed || 0;
-          totalCo2 += data.co2Saved || 0;
+          if (data.status !== 'cancelled') {
+            totalBookings++;
+            totalSpent += data.estimatedCost || 0;
+          }
         });
 
-        const bookingQ = query(collection(db, 'bookings'), where('userId', '==', user.uid));
-        const bookingSnapshot = await getDocs(bookingQ);
-        let totalBookings = 0;
-        bookingSnapshot.forEach(() => totalBookings++);
+        // Estimate energy: ~10 kWh per hour (1 hour bookings)
+        const totalEnergy = totalBookings * 10;
+        // Estimate CO2 saved: ~0.28 kg per kWh
+        const totalCo2 = totalEnergy * 0.28;
 
         setStats({
-          sessions: totalSessions + totalBookings,
+          bookings: totalBookings,
           spent: totalSpent,
           energy: totalEnergy,
-          co2: totalCo2
+          co2: totalCo2,
         });
-      } catch (error) { console.error('Error fetching stats:', error); }
+      } catch (error) {
+        console.error('Error fetching stats:', error);
+      }
       setLoading(false);
     };
     fetchStats();
@@ -46,45 +55,161 @@ const Dashboard = () => {
 
   return (
     <div className="dashboard-page">
-      <div className="container" style={{ padding: '40px 0' }}>
-        <h1 className="page-title">Welcome back, {user?.displayName || 'User'}!</h1>
-        
+      <div className="container" style={{ padding: '40px 20px' }}>
+        <h1 className="page-title">
+          Welcome back, {user?.displayName || 'User'}!
+        </h1>
+
         <div className="stats-grid">
-          <div className="stat-card"><FaPlug className="stat-icon" /><h3>{stats.sessions}</h3><p>Charging Sessions</p></div>
-          <div className="stat-card"><FaWallet className="stat-icon" /><h3>₹{stats.spent}</h3><p>Total Spent</p></div>
-          <div className="stat-card"><FaBolt className="stat-icon" /><h3>{stats.energy} kWh</h3><p>Energy Consumed</p></div>
-          <div className="stat-card"><FaLeaf className="stat-icon" /><h3>{stats.co2.toFixed(1)} kg</h3><p>CO₂ Saved</p></div>
+          <div className="stat-card">
+            <FaPlug className="stat-icon" />
+            <h3>{stats.bookings}</h3>
+            <p>Total Bookings</p>
+          </div>
+          <div className="stat-card">
+            <FaWallet className="stat-icon" />
+            <h3>₹{stats.spent}</h3>
+            <p>Total Spent</p>
+          </div>
+          <div className="stat-card">
+            <FaBolt className="stat-icon" />
+            <h3>{stats.energy} kWh</h3>
+            <p>Energy Consumed</p>
+          </div>
+          <div className="stat-card">
+            <FaLeaf className="stat-icon" />
+            <h3>{stats.co2.toFixed(1)} kg</h3>
+            <p>CO₂ Saved</p>
+          </div>
         </div>
 
         <div className="dashboard-actions">
-          <Link to="/stations" className="action-card"><FaMapMarkerAlt className="action-icon" /><h3>Find Station</h3><p>Search nearby charging stations</p></Link>
-          <Link to="/stations" className="action-card"><FaBolt className="action-icon" /><h3>Book Charger</h3><p>Book a charging slot</p></Link>
-          <Link to="/history" className="action-card"><FaHistory className="action-icon" /><h3>Charging History</h3><p>View your past sessions</p></Link>
-          <Link to="/sustainability" className="action-card"><FaChartLine className="action-icon" /><h3>My Impact</h3><p>Track your sustainability</p></Link>
+          <Link to="/stations" className="action-card">
+            <FaMapMarkerAlt className="action-icon" />
+            <h3>Find Station</h3>
+            <p>Search nearby charging stations</p>
+          </Link>
+          <Link to="/stations" className="action-card">
+            <FaBolt className="action-icon" />
+            <h3>Book Charger</h3>
+            <p>Book a charging slot</p>
+          </Link>
+          <Link to="/history" className="action-card">
+            <FaHistory className="action-icon" />
+            <h3>Booking History</h3>
+            <p>View your past bookings</p>
+          </Link>
+          <Link to="/sustainability" className="action-card">
+            <FaChartLine className="action-icon" />
+            <h3>My Impact</h3>
+            <p>Track your sustainability</p>
+          </Link>
         </div>
       </div>
 
       <style jsx>{`
-        .dashboard-page { padding: 20px 0; }
-        .page-title { text-align: center; font-size: 32px; color: #1a1a2e; margin-bottom: 30px; }
-        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 40px; }
-        .stat-card { background: white; padding: 25px; border-radius: 12px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-        .stat-icon { font-size: 32px; color: #2e7d32; margin-bottom: 10px; }
-        .stat-card h3 { font-size: 24px; color: #1a1a2e; }
-        .stat-card p { color: #6c757d; }
-        .dashboard-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
-        .action-card { background: white; padding: 30px; border-radius: 12px; text-align: center; text-decoration: none; box-shadow: 0 2px 8px rgba(0,0,0,0.08); transition: all 0.3s ease; }
-        .action-card:hover { transform: translateY(-5px); box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
-        .action-icon { font-size: 36px; color: #2e7d32; margin-bottom: 12px; }
-        .action-card h3 { color: #1a1a2e; margin-bottom: 8px; }
-        .action-card p { color: #6c757d; font-size: 14px; }
-        @media (max-width: 768px) { 
-          .stats-grid { grid-template-columns: repeat(2, 1fr); } 
-          .dashboard-actions { grid-template-columns: repeat(2, 1fr); } 
+        .dashboard-page {
+          padding: 20px 0;
+          min-height: 100vh;
+          background: var(--bg);
         }
-        @media (max-width: 480px) { 
-          .stats-grid { grid-template-columns: 1fr; } 
-          .dashboard-actions { grid-template-columns: 1fr; } 
+        .page-title {
+          text-align: center;
+          font-size: 32px;
+          color: var(--text);
+          margin-bottom: 30px;
+          font-weight: 800;
+          letter-spacing: -0.02em;
+        }
+        .stats-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 20px;
+          margin-bottom: 40px;
+        }
+        .stat-card {
+          background: var(--surface);
+          padding: 28px 24px;
+          border-radius: 16px;
+          text-align: center;
+          border: 1px solid var(--border);
+          box-shadow: var(--shadow-md);
+          transition: all 0.3s;
+        }
+        .stat-card:hover {
+          transform: translateY(-4px);
+          box-shadow: var(--shadow-lg);
+          border-color: var(--border-strong);
+        }
+        .stat-icon {
+          font-size: 32px;
+          color: var(--primary);
+          margin-bottom: 12px;
+        }
+        .stat-card h3 {
+          font-size: 26px;
+          color: var(--text);
+          font-weight: 800;
+          letter-spacing: -0.03em;
+          margin-bottom: 4px;
+        }
+        .stat-card p {
+          color: var(--text-muted);
+          font-size: 13px;
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+          font-weight: 600;
+        }
+        .dashboard-actions {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 20px;
+        }
+        .action-card {
+          background: var(--surface);
+          padding: 32px 24px;
+          border-radius: 16px;
+          text-align: center;
+          text-decoration: none;
+          border: 1px solid var(--border);
+          box-shadow: var(--shadow-md);
+          transition: all 0.3s;
+        }
+        .action-card:hover {
+          transform: translateY(-6px);
+          box-shadow: var(--shadow-lg);
+          border-color: var(--primary);
+        }
+        .action-icon {
+          font-size: 36px;
+          color: var(--primary);
+          margin-bottom: 12px;
+        }
+        .action-card h3 {
+          color: var(--text);
+          margin-bottom: 8px;
+          font-size: 16px;
+          font-weight: 700;
+        }
+        .action-card p {
+          color: var(--text-muted);
+          font-size: 13px;
+        }
+        @media (max-width: 768px) {
+          .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+          .dashboard-actions {
+            grid-template-columns: repeat(2, 1fr);
+          }
+        }
+        @media (max-width: 480px) {
+          .stats-grid {
+            grid-template-columns: 1fr;
+          }
+          .dashboard-actions {
+            grid-template-columns: 1fr;
+          }
         }
       `}</style>
     </div>

@@ -2,20 +2,26 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { FaEnvelope, FaLock, FaUser } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
-import { db } from '../firebase';
+import { auth, db } from '../firebase';
+import { sendPasswordResetEmail } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 
 const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
+  // ============================================================
+  // HANDLE LOGIN
+  // ============================================================
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setSuccess('');
     setLoading(true);
 
     try {
@@ -35,8 +41,57 @@ const Login = () => {
       } else {
         navigate('/dashboard');
       }
-    } catch (error) {
-      setError(error.message || 'Failed to login');
+    } catch (err) {
+      // Handle specific Firebase error codes with friendly messages
+      let message = 'Failed to login';
+
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
+        message = '❌ Invalid email or password. If you registered via Email Link, use the "Login with Email Link" option below.';
+      } else if (err.code === 'auth/user-not-found') {
+        message = '❌ No account found with this email. Please register first.';
+      } else if (err.code === 'auth/too-many-requests') {
+        message = '❌ Too many failed attempts. Try again in a few minutes.';
+      } else if (err.code === 'auth/invalid-email') {
+        message = '❌ Invalid email address.';
+      } else if (err.message) {
+        message = err.message;
+      }
+
+      setError(message);
+    }
+    setLoading(false);
+  };
+
+  // ============================================================
+  // HANDLE PASSWORD RESET
+  // ============================================================
+  const handleResetPassword = async () => {
+    setError('');
+    setSuccess('');
+
+    if (!email) {
+      setError('Please enter your email address first, then click "Forgot Password?"');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, email);
+      setSuccess(`✅ Password reset link sent to ${email}. Check your inbox (and spam folder).`);
+    } catch (err) {
+      let message = 'Failed to send reset email';
+
+      if (err.code === 'auth/user-not-found') {
+        message = '❌ No account found with this email.';
+      } else if (err.code === 'auth/invalid-email') {
+        message = '❌ Invalid email address.';
+      } else if (err.code === 'auth/too-many-requests') {
+        message = '❌ Too many requests. Try again later.';
+      } else if (err.message) {
+        message = err.message;
+      }
+
+      setError(message);
     }
     setLoading(false);
   };
@@ -51,6 +106,7 @@ const Login = () => {
         <p className="auth-subtitle">Login to book charging stations</p>
 
         {error && <div className="error-message">{error}</div>}
+        {success && <div className="success-message">{success}</div>}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
@@ -75,7 +131,17 @@ const Login = () => {
             />
           </div>
 
-          <button type="submit" className="btn btn-primary btn-full" disabled={loading}>
+          <p className="forgot-password">
+            <button type="button" onClick={handleResetPassword} disabled={loading}>
+              Forgot Password?
+            </button>
+          </p>
+
+          <button
+            type="submit"
+            className="btn btn-primary btn-full"
+            disabled={loading}
+          >
             {loading ? 'Logging in...' : 'Login as User'}
           </button>
         </form>
@@ -140,6 +206,28 @@ const Login = () => {
         .form-group input {
           padding-left: 42px;
         }
+        .forgot-password {
+          text-align: right;
+          margin-top: -10px;
+          margin-bottom: 20px;
+        }
+        .forgot-password button {
+          background: none;
+          border: none;
+          color: var(--primary);
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          padding: 0;
+          font-family: inherit;
+        }
+        .forgot-password button:hover:not(:disabled) {
+          text-decoration: underline;
+        }
+        .forgot-password button:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
         .btn-full {
           width: 100%;
           padding: 14px;
@@ -179,6 +267,28 @@ const Login = () => {
         }
         .owner-link a {
           color: #1565c0;
+        }
+        .error-message {
+          background: #f8d7da;
+          color: #721c24;
+          padding: 12px 16px;
+          border-radius: 10px;
+          margin-bottom: 20px;
+          border-left: 4px solid #dc3545;
+          font-size: 13px;
+          font-weight: 500;
+          line-height: 1.5;
+        }
+        .success-message {
+          background: #d4edda;
+          color: #155724;
+          padding: 12px 16px;
+          border-radius: 10px;
+          margin-bottom: 20px;
+          border-left: 4px solid #28a745;
+          font-size: 13px;
+          font-weight: 500;
+          line-height: 1.5;
         }
       `}</style>
     </div>

@@ -14,7 +14,6 @@ import OwnerLogin from './pages/OwnerLogin';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Booking from './pages/Booking';
-import ChargingSession from './pages/ChargingSession';
 import History from './pages/History';
 import Sustainability from './pages/Sustainability';
 import OwnerDashboard from './pages/OwnerDashboard';
@@ -52,14 +51,6 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Booking />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/charging/:sessionId"
-              element={
-                <ProtectedRoute>
-                  <ChargingSession />
                 </ProtectedRoute>
               }
             />
