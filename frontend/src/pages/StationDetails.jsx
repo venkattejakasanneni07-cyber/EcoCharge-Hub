@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { FaMapMarkerAlt, FaBolt, FaClock, FaStar, FaArrowLeft, FaPlug } from 'react-icons/fa';
+import { FaMapMarkerAlt, FaBolt, FaClock, FaStar, FaArrowLeft, FaPlug, FaHome, FaBuilding } from 'react-icons/fa';
 import { db } from '../firebase';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import Reviews from '../components/Reviews';
@@ -47,10 +47,10 @@ const StationDetails = () => {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'available': return '#238636';
-      case 'occupied': return '#dc2626';
-      case 'maintenance': return '#f59e0b';
-      default: return '#6c757d';
+      case 'available': return 'var(--status-available)';
+      case 'occupied': return 'var(--status-unavailable)';
+      case 'maintenance': return 'var(--status-limited)';
+      default: return 'var(--text-muted)';
     }
   };
 
@@ -65,7 +65,17 @@ const StationDetails = () => {
         </Link>
 
         <div className="station-header">
-          <h1>{station.name}</h1>
+          <div>
+            <h1>
+              {station.name}
+              {station.type === 'home' && (
+                <span className="home-badge"><FaHome /> P2P Home Charger</span>
+              )}
+              {station.type === 'commercial' && (
+                <span className="commercial-badge"><FaBuilding /> Commercial</span>
+              )}
+            </h1>
+          </div>
           <div className="rating">
             <FaStar className="star-icon" />
             <span>{station.averageRating || station.rating || 4.5}</span>
@@ -83,6 +93,10 @@ const StationDetails = () => {
           <div className="info-item">
             <FaClock className="info-icon" />
             <span>Open: {station.openingHours || '24/7'}</span>
+          </div>
+          <div className="info-item">
+            <FaBolt className="info-icon" />
+            <span>Base Price: ₹{station.pricePerKwh || 15} / kWh</span>
           </div>
         </div>
 
@@ -108,7 +122,7 @@ const StationDetails = () => {
                   <div className="charger-details">
                     <p><FaPlug /> Charger #{charger.chargerNumber || charger.id}</p>
                     <p><strong>Power:</strong> {charger.power}</p>
-                    <p><strong>Price:</strong> {charger.pricePerKwh}</p>
+                    <p><strong>Price:</strong> {charger.pricePerKwh || `₹${station.pricePerKwh || 15}`} / kWh</p>
                   </div>
                   {charger.status === 'available' ? (
                     <Link
@@ -136,112 +150,85 @@ const StationDetails = () => {
         <Reviews stationId={station.id} stationName={station.name} />
       </div>
 
-      <style jsx>{`
+      <style>{`
         .station-details-page { padding: 20px 0; min-height: 100vh; background: var(--bg); }
         .back-link {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          color: var(--primary);
-          text-decoration: none;
-          margin-bottom: 20px;
-          font-weight: 600;
-          font-size: 14px;
+          display: inline-flex; align-items: center; gap: 8px;
+          color: var(--primary); text-decoration: none;
+          margin-bottom: 20px; font-weight: 600; font-size: 14px;
         }
         .back-link:hover { text-decoration: underline; }
         .station-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 20px;
-          flex-wrap: wrap;
-          gap: 10px;
+          display: flex; justify-content: space-between;
+          align-items: center; margin-bottom: 20px;
+          flex-wrap: wrap; gap: 10px;
         }
-        .station-header h1 { font-size: 32px; color: var(--text); font-weight: 800; letter-spacing: -0.02em; }
+        .station-header h1 { 
+          font-size: 32px; color: var(--text); font-weight: 800; letter-spacing: -0.02em;
+          display: flex; align-items: center; gap: 15px; flex-wrap: wrap;
+        }
+        .home-badge {
+          font-size: 12px; text-transform: uppercase; background: #f59e0b;
+          color: white; padding: 4px 12px; border-radius: 20px; font-weight: 800;
+          display: inline-flex; align-items: center; gap: 6px;
+        }
+        .commercial-badge {
+          font-size: 12px; text-transform: uppercase; background: var(--primary);
+          color: white; padding: 4px 12px; border-radius: 20px; font-weight: 800;
+          display: inline-flex; align-items: center; gap: 6px;
+        }
         .rating { display: flex; align-items: center; gap: 5px; color: #f59e0b; font-size: 18px; }
         .star-icon { color: #f59e0b; }
         .review-count { color: var(--text-muted); font-size: 14px; }
         .station-info {
-          display: flex;
-          gap: 30px;
-          background: var(--surface);
-          padding: 20px;
-          border-radius: 16px;
-          border: 1px solid var(--border);
-          box-shadow: var(--shadow-md);
-          margin-bottom: 30px;
-          flex-wrap: wrap;
+          display: flex; gap: 30px; background: var(--surface); padding: 20px;
+          border-radius: 16px; border: 1px solid var(--border);
+          box-shadow: var(--shadow-md); margin-bottom: 30px; flex-wrap: wrap;
         }
         .info-item { display: flex; align-items: center; gap: 10px; color: var(--text); }
         .info-icon { color: var(--primary); }
         .empty-state {
-          text-align: center;
-          padding: 40px;
-          background: var(--surface);
-          border-radius: 12px;
-          color: var(--text-muted);
+          text-align: center; padding: 40px; background: var(--surface);
+          border-radius: 12px; color: var(--text-muted);
         }
         .chargers-section h2 {
-          margin-bottom: 20px;
-          color: var(--text);
-          font-size: 24px;
-          font-weight: 700;
-          letter-spacing: -0.02em;
+          margin-bottom: 20px; color: var(--text);
+          font-size: 24px; font-weight: 700; letter-spacing: -0.02em;
         }
         .chargers-grid {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 20px;
-          margin-bottom: 20px;
+          display: grid; grid-template-columns: repeat(3, 1fr);
+          gap: 20px; margin-bottom: 20px;
         }
         .charger-card {
-          background: var(--surface);
-          padding: 20px;
-          border-radius: 16px;
-          border: 1px solid var(--border);
-          box-shadow: var(--shadow-md);
+          background: var(--surface); padding: 20px; border-radius: 16px;
+          border: 1px solid var(--border); box-shadow: var(--shadow-md);
           transition: all 0.3s;
         }
         .charger-card:hover {
-          transform: translateY(-4px);
-          box-shadow: var(--shadow-lg);
+          transform: translateY(-4px); box-shadow: var(--shadow-lg);
           border-color: var(--border-strong);
         }
         .charger-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 12px;
+          display: flex; justify-content: space-between;
+          align-items: center; margin-bottom: 12px;
         }
         .charger-header h3 { color: var(--text); font-size: 18px; font-weight: 700; }
         .status-badge {
-          padding: 4px 12px;
-          border-radius: 20px;
-          color: white;
-          font-size: 11px;
-          font-weight: 700;
-          text-transform: uppercase;
+          padding: 4px 12px; border-radius: 20px; color: white;
+          font-size: 11px; font-weight: 700; text-transform: uppercase;
           letter-spacing: 0.03em;
         }
         .charger-details p {
-          margin: 5px 0;
-          color: var(--text-muted);
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 13px;
+          margin: 5px 0; color: var(--text-muted);
+          display: flex; align-items: center; gap: 8px; font-size: 13px;
         }
         .charger-details strong { color: var(--text); }
         .charger-card .btn {
-          width: 100%;
-          margin-top: 12px;
-          text-align: center;
+          width: 100%; margin-top: 12px; text-align: center;
         }
         .charger-card .btn:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-          background: var(--text-subtle);
-          border: none;
+          opacity: 0.5; cursor: not-allowed;
+          background: var(--text-subtle); border: none;
         }
 
         @media (max-width: 992px) {

@@ -4,7 +4,7 @@ import {
   FaSearch, FaMapMarkerAlt, FaBolt, FaStar, FaFilter, 
   FaList, FaMap, FaTimes, FaLocationArrow, FaChargingStation, 
   FaBuilding, FaPlug, FaChevronDown, FaChevronUp, FaSync,
-  FaDirections
+  FaDirections, FaHome
 } from 'react-icons/fa';
 import { db } from '../firebase';
 import { collection, getDocs, query, limit } from 'firebase/firestore';
@@ -56,10 +56,8 @@ const openDirections = (station, userLocation) => {
   let url;
 
   if (userLocation) {
-    // Directions from user's location to station
     url = `https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${destLat},${destLng}&travelmode=driving`;
   } else {
-    // Just show the station on Google Maps
     url = `https://www.google.com/maps/search/?api=1&query=${destLat},${destLng}`;
   }
 
@@ -96,7 +94,8 @@ const Stations = () => {
     fastCharging: false,
     availableOnly: false,
     solarOnly: false,
-    onlyNearby: false
+    onlyNearby: false,
+    stationType: 'all' // 'all', 'home', 'commercial'
   });
 
   // ================= FETCH STATIONS =================
@@ -194,6 +193,10 @@ const Stations = () => {
       });
     }
 
+    if (filters.stationType !== 'all') {
+      result = result.filter(s => s.type === filters.stationType);
+    }
+
     if (filters.states.length > 0) {
       result = result.filter((s) => {
         const state = cleanText(s.state);
@@ -288,7 +291,8 @@ const Stations = () => {
       fastCharging: false,
       availableOnly: false,
       solarOnly: false,
-      onlyNearby: false
+      onlyNearby: false,
+      stationType: 'all'
     });
     setSearchTerm('');
     clearLocation();
@@ -302,7 +306,8 @@ const Stations = () => {
     (filters.fastCharging ? 1 : 0) +
     (filters.availableOnly ? 1 : 0) +
     (filters.solarOnly ? 1 : 0) +
-    (filters.onlyNearby ? 1 : 0);
+    (filters.onlyNearby ? 1 : 0) +
+    (filters.stationType !== 'all' ? 1 : 0);
 
   if (loading) return <div className="spinner"></div>;
 
@@ -421,6 +426,48 @@ const Stations = () => {
               </div>
             )}
 
+            {/* CHARGER TYPE FILTER (NEW) */}
+            <div className="filter-group">
+              <button className="filter-group-header" onClick={() => toggleSection('chargerType')}>
+                <h4>Station Type</h4>
+                {expandedSections.chargerType ? <FaChevronUp /> : <FaChevronDown />}
+              </button>
+              {expandedSections.chargerType && (
+                <div className="checkbox-group">
+                  <label className="checkbox-option">
+                    <input
+                      type="radio"
+                      name="stationType"
+                      checked={filters.stationType === 'all'}
+                      onChange={() => setFilters({ ...filters, stationType: 'all' })}
+                    />
+                    <span className="radio-custom"></span>
+                    <span>All Stations</span>
+                  </label>
+                  <label className="checkbox-option">
+                    <input
+                      type="radio"
+                      name="stationType"
+                      checked={filters.stationType === 'home'}
+                      onChange={() => setFilters({ ...filters, stationType: 'home' })}
+                    />
+                    <span className="radio-custom"></span>
+                    <span><FaHome style={{marginRight: '5px'}}/> Home Chargers (P2P)</span>
+                  </label>
+                  <label className="checkbox-option">
+                    <input
+                      type="radio"
+                      name="stationType"
+                      checked={filters.stationType === 'commercial'}
+                      onChange={() => setFilters({ ...filters, stationType: 'commercial' })}
+                    />
+                    <span className="radio-custom"></span>
+                    <span><FaBuilding style={{marginRight: '5px'}}/> Commercial Stations</span>
+                  </label>
+                </div>
+              )}
+            </div>
+
             {/* STATE */}
             {filterOptions.states.length > 0 && (
               <div className="filter-group">
@@ -464,31 +511,6 @@ const Stations = () => {
                         />
                         <span className="checkbox-custom"></span>
                         <span>{city}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* CHARGER TYPE */}
-            {filterOptions.chargerTypes.length > 0 && (
-              <div className="filter-group">
-                <button className="filter-group-header" onClick={() => toggleSection('chargerType')}>
-                  <h4>Charger Type</h4>
-                  {expandedSections.chargerType ? <FaChevronUp /> : <FaChevronDown />}
-                </button>
-                {expandedSections.chargerType && (
-                  <div className="checkbox-group scrollable">
-                    {filterOptions.chargerTypes.slice(0, 15).map((type) => (
-                      <label key={type} className="checkbox-option">
-                        <input
-                          type="checkbox"
-                          checked={filters.chargerTypes.includes(type)}
-                          onChange={() => toggleArrayFilter('chargerTypes', type)}
-                        />
-                        <span className="checkbox-custom"></span>
-                        <span>{type.length > 35 ? type.substring(0, 35) + '...' : type}</span>
                       </label>
                     ))}
                   </div>
@@ -640,6 +662,12 @@ const Stations = () => {
                     </button>
                   </span>
                 )}
+                {filters.stationType !== 'all' && (
+                  <span className="filter-chip">
+                    {filters.stationType === 'home' ? <><FaHome /> Home Chargers</> : <><FaBuilding /> Commercial</>}
+                    <button onClick={() => setFilters({ ...filters, stationType: 'all' })}><FaTimes /></button>
+                  </span>
+                )}
                 {filters.states.map((s) => (
                   <span key={`state-${s}`} className="filter-chip">
                     🗺️ {s}
@@ -650,12 +678,6 @@ const Stations = () => {
                   <span key={`city-${c}`} className="filter-chip">
                     🏙️ {c}
                     <button onClick={() => toggleArrayFilter('cities', c)}><FaTimes /></button>
-                  </span>
-                ))}
-                {filters.chargerTypes.map((t) => (
-                  <span key={`type-${t}`} className="filter-chip">
-                    🔌 {t.substring(0, 20)}
-                    <button onClick={() => toggleArrayFilter('chargerTypes', t)}><FaTimes /></button>
                   </span>
                 ))}
                 {filters.powers.map((p) => (
@@ -697,7 +719,7 @@ const Stations = () => {
         </div>
       </div>
 
-      <style jsx>{`
+      <style>{`
         .stations-page { min-height: 100vh; background: var(--bg); }
 
         .stations-header {
@@ -897,6 +919,21 @@ const Stations = () => {
           top: 50%; left: 50%; transform: translate(-50%, -50%);
           color: white; font-size: 10px; font-weight: bold;
         }
+        .radio-custom {
+          width: 16px; height: 16px;
+          border: 2px solid var(--border-strong);
+          border-radius: 50%; position: relative;
+          flex-shrink: 0; transition: all 0.2s;
+        }
+        .checkbox-option input:checked + .radio-custom {
+          border-color: var(--primary);
+        }
+        .checkbox-option input:checked + .radio-custom::after {
+          content: ''; position: absolute;
+          top: 50%; left: 50%; transform: translate(-50%, -50%);
+          width: 8px; height: 8px;
+          background: var(--primary); border-radius: 50%;
+        }
         .apply-filters-btn { display: none; width: 100%; padding: 12px; margin-top: 16px; }
 
         /* ============ NEARBY TOGGLE ============ */
@@ -1049,7 +1086,7 @@ const Stations = () => {
 
 // ================= STATION LIST ITEM =================
 const StationListItem = ({ station, userLocation, isNearest }) => {
-  const operator = station.operator || 'Unknown Operator';
+  const operator = station.operator || station.name || 'Unknown Operator';
   const ownership = station.ownership || '';
   const stationName = station.name || '';
   const city = cleanText(station.city);
@@ -1082,13 +1119,18 @@ const StationListItem = ({ station, userLocation, isNearest }) => {
       {isNearest && <div className="nearest-tag">📍 Nearest Station</div>}
       
       <div className="station-item-icon">
-        <FaChargingStation />
+        {station.type === 'home' ? <FaHome /> : <FaChargingStation />}
       </div>
 
       <div className="station-item-details">
         <div className="station-item-header">
           <div>
-            <h3>{operator}</h3>
+            <h3>
+              {operator}
+              {station.type === 'home' && (
+                <span className="home-badge">P2P Home Charger</span>
+              )}
+            </h3>
             {stationName && stationName !== operator && (
               <p className="station-item-name">{stationName}</p>
             )}
@@ -1133,7 +1175,7 @@ const StationListItem = ({ station, userLocation, isNearest }) => {
 
           <div className="station-item-price-action">
             <div className="price">
-              <span className="price-value">₹{station.price || '15'}</span>
+              <span className="price-value">₹{station.pricePerKwh || station.price || '15'}</span>
               <span className="price-unit">/kWh</span>
             </div>
             
@@ -1152,7 +1194,7 @@ const StationListItem = ({ station, userLocation, isNearest }) => {
         </div>
       </div>
 
-      <style jsx>{`
+      <style>{`
         .station-item {
           position: relative;
           display: flex; gap: 20px; background: var(--surface);
@@ -1188,6 +1230,13 @@ const StationListItem = ({ station, userLocation, isNearest }) => {
         }
         .station-item-header h3 {
           color: var(--text); font-size: 18px; font-weight: 700;
+          display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+        }
+        .home-badge {
+          font-size: 10px; text-transform: uppercase;
+          background: #f59e0b; color: white;
+          padding: 2px 8px; border-radius: 10px;
+          font-weight: 800; letter-spacing: 0.05em;
         }
         .station-item-name {
           color: var(--text-subtle); font-size: 12px;

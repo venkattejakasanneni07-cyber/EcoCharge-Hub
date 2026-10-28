@@ -1,800 +1,374 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
-  FaCalendarAlt, FaClock, FaBolt, FaWallet, FaChargingStation,
-  FaArrowLeft, FaCheckCircle, FaBan, FaSpinner
+  FaWallet, FaCheckCircle, FaBan
 } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../firebase';
 import {
-  collection, addDoc, serverTimestamp, query, where, getDocs,
-  getDoc, doc
+  collection, addDoc, serverTimestamp, query, where, getDocs, getDoc, doc
 } from 'firebase/firestore';
-import {
-  generateTimeSlots, isSlotBlocked, isPastSlot, getTodayString
-} from '../utils/slotUtils';
+import { generateTimeSlots, getTodayString } from '../utils/slotUtils';
 
 const Booking = () => {
   const { stationId } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [searchParams] = useSearchParams();
-  const preselectedCharger = searchParams.get('charger');
 
-  // ============ STATE ============
   const [selectedCharger, setSelectedCharger] = useState('');
   const [selectedDate, setSelectedDate] = useState(getTodayString());
-  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [startTime, setStartTime] = useState('');
+  const [endTime, setEndTime] = useState('');
   const [selectedChargerData, setSelectedChargerData] = useState(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const [station, setStation] = useState(null);
   const [chargers, setChargers] = useState([]);
   const [existingBookings, setExistingBookings] = useState([]);
-  const [loadingSlots, setLoadingSlots] = useState(false);
+  
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
 
-  const timeSlots = generateTimeSlots(6, 22, 60);
+  // Timer to update "Past" status automatically
+  const [currentTime, setCurrentTime] = useState(new Date());
 
-  // ============================================================
-  // FETCH STATION + CHARGERS
-  // ============================================================
+  const timeSlots = generateTimeSlots(6, 22, 60); 
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
   useEffect(() => {
     const fetchStationData = async () => {
       try {
-        // Fetch station
         const stationDoc = await getDoc(doc(db, 'stations', stationId));
-        if (stationDoc.exists()) {
-          setStation({ id: stationDoc.id, ...stationDoc.data() });
-        }
+        if (stationDoc.exists()) setStation({ id: stationDoc.id, ...stationDoc.data() });
 
-        // Fetch chargers sub-collection
-        const chargersSnap = await getDocs(
-          collection(db, 'stations', stationId, 'chargers')
-        );
+        const chargersSnap = await getDocs(collection(db, 'stations', stationId, 'chargers'));
         const chargersData = [];
-        chargersSnap.forEach((docSnap) => {
-          chargersData.push({ id: docSnap.id, ...docSnap.data() });
-        });
+        chargersSnap.forEach((docSnap) => chargersData.push({ id: docSnap.id, ...docSnap.data() }));
 
-        let finalChargers = chargersData;
-
-        // If no sub-collection chargers, use defaults
         if (chargersData.length === 0) {
-          finalChargers = [
+          chargersData.push(
             { id: 'charger1', chargerNumber: '1', type: 'CCS', power: '60 kW', pricePerKwh: '₹15', status: 'available' },
-            { id: 'charger2', chargerNumber: '2', type: 'Type 2', power: '22 kW', pricePerKwh: '₹12', status: 'available' },
-            { id: 'charger3', chargerNumber: '3', type: 'CHAdeMO', power: '50 kW', pricePerKwh: '₹14', status: 'available' },
-          ];
+            { id: 'charger2', chargerNumber: '2', type: 'Type 2', power: '22 kW', pricePerKwh: '₹12', status: 'available' }
+          );
         }
-
-        setChargers(finalChargers);
-
-        // Handle preselected charger from URL (?charger=xxx)
-        if (preselectedCharger) {
-          const found = finalChargers.find((c) => c.id === preselectedCharger);
-          if (found) {
-            setSelectedCharger(preselectedCharger);
-            setSelectedChargerData(found);
-          }
-        }
+        setChargers(chargersData);
       } catch (err) {
-        console.error('Error fetching station:', err);
-        setError('Failed to load station data');
+        console.error(err);
       }
     };
-
     fetchStationData();
-  }, [stationId, preselectedCharger]);
+  }, [stationId]);
 
-  // ============================================================
-  // FETCH EXISTING BOOKINGS for selected charger + date
-  // ============================================================
   useEffect(() => {
     const fetchBookings = async () => {
-      if (!selectedCharger || !selectedDate) {
-        setExistingBookings([]);
-        return;
-      }
-
-      setLoadingSlots(true);
+      if (!selectedCharger || !selectedDate) return;
       try {
-        const bookingsQuery = query(
+        const q = query(
           collection(db, 'bookings'),
           where('stationId', '==', stationId),
           where('chargerId', '==', selectedCharger),
           where('date', '==', selectedDate)
         );
-        const snapshot = await getDocs(bookingsQuery);
+        const snapshot = await getDocs(q);
         const data = [];
         snapshot.forEach((docSnap) => {
-          data.push({ id: docSnap.id, ...docSnap.data() });
+          if(docSnap.data().status !== 'cancelled') data.push({ id: docSnap.id, ...docSnap.data() });
         });
         setExistingBookings(data);
       } catch (err) {
-        console.error('Error fetching bookings:', err);
-        setExistingBookings([]);
+        console.error(err);
       }
-      setLoadingSlots(false);
     };
-
     fetchBookings();
   }, [selectedCharger, selectedDate, stationId]);
 
-  // ============================================================
-  // HANDLERS
-  // ============================================================
-  const handleChargerSelect = (chargerId) => {
-    setSelectedCharger(chargerId);
-    setSelectedSlot(null);
-    const charger = chargers.find((c) => c.id === chargerId);
-    setSelectedChargerData(charger);
+  const toMinutes = (timeStr) => {
+    if (!timeStr) return 0;
+    const [h, m] = timeStr.split(':').map(Number);
+    return h * 60 + m;
   };
 
-  const handleSlotSelect = (slot) => {
-    setSelectedSlot(slot);
-    setError('');
+  const isBlockBooked = (slotStart, slotEnd) => {
+    const reqStart = toMinutes(slotStart);
+    const reqEnd = toMinutes(slotEnd);
+    return existingBookings.some((booking) => {
+      const bookStart = toMinutes(booking.startTime);
+      const bookEnd = toMinutes(booking.endTime);
+      return (reqStart < bookEnd && reqEnd > bookStart);
+    });
+  };
+
+  const isSlotPast = (slotStart) => {
+    const today = getTodayString();
+    if (selectedDate > today) return false; 
+    if (selectedDate < today) return true;
+
+    const currentMins = currentTime.getHours() * 60 + currentTime.getMinutes();
+    return toMinutes(slotStart) < currentMins;
+  };
+
+  const calculateHours = () => {
+    if (!startTime || !endTime) return 0;
+    const startMins = toMinutes(startTime);
+    const endMins = toMinutes(endTime);
+    if (endMins <= startMins) return 0;
+    return (endMins - startMins) / 60;
   };
 
   const calculateCost = () => {
     if (!selectedChargerData) return 0;
-    const priceStr = selectedChargerData.pricePerKwh || '15';
-    const price = parseFloat(priceStr.replace(/[^\d.]/g, '')) || 15;
-    const hours = 1;
-    const energyPerHour = 10;
-    return price * energyPerHour * hours;
+    let basePrice = station?.pricePerKwh || 15;
+    if (selectedChargerData.pricePerKwh) {
+      const parsed = parseFloat(String(selectedChargerData.pricePerKwh).replace(/[^\d.]/g, ''));
+      if (!isNaN(parsed)) basePrice = parsed;
+    }
+    return Math.round(basePrice * 10 * calculateHours());
   };
 
+  // 🔥 RAZORPAY PAYMENT HANDLER
   const handleBooking = async (e) => {
     e.preventDefault();
-
-    if (!user) {
-      setError('Please login to book a slot');
-      return;
-    }
-    if (!selectedCharger) {
-      setError('Please select a charger');
-      return;
-    }
-    if (!selectedSlot) {
-      setError('Please select a time slot');
-      return;
-    }
+    if (!user) return setError('Please login to book.');
+    if (calculateHours() <= 0) return setError('End time must be after start time.');
+    if (isSlotPast(startTime)) return setError('❌ You cannot book a time in the past.');
+    if (isBlockBooked(startTime, endTime)) return setError('❌ This time range is already booked.');
 
     setError('');
-    setLoading(true);
+    setIsProcessingPayment(true);
 
     try {
-      // FINAL CONFLICT CHECK
-      const conflictQuery = query(
-        collection(db, 'bookings'),
-        where('stationId', '==', stationId),
-        where('chargerId', '==', selectedCharger),
-        where('date', '==', selectedDate)
-      );
-      const conflictSnap = await getDocs(conflictQuery);
+      // 1. Load Razorpay Script Dynamically
+      const scriptLoaded = await new Promise((resolve) => {
+        if (window.Razorpay) return resolve(true);
+        const script = document.createElement('script');
+        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        script.onload = () => resolve(true);
+        script.onerror = () => resolve(false);
+        document.body.appendChild(script);
+      });
 
-      const latestBookings = [];
-      conflictSnap.forEach((docSnap) => latestBookings.push(docSnap.data()));
-
-      if (isSlotBlocked(selectedSlot.start, selectedSlot.end, latestBookings, selectedDate)) {
-        setError('❌ This slot was just booked by someone else. Please pick another slot.');
-        setLoading(false);
-        setExistingBookings(latestBookings);
-        return;
+      if (!scriptLoaded) {
+        throw new Error('Razorpay SDK failed to load. Check your internet connection or disable ad-blockers.');
       }
 
-      // Create booking document
-      const bookingData = {
-        userId: user.uid,
-        userEmail: user.email,
-        userName: user.displayName || 'User',
-        stationId: stationId,
-        stationName: station?.name || 'Charging Station',
-        stationAddress: station?.address || '',
-        stationCity: station?.city || '',
-        chargerId: selectedCharger,
-        chargerType: selectedChargerData?.type || 'CCS',
-        chargerPower: selectedChargerData?.power || '',
-        date: selectedDate,
-        startTime: selectedSlot.start,
-        endTime: selectedSlot.end,
-        duration: 1,
-        estimatedCost: calculateCost(),
-        status: 'confirmed',
-        createdAt: serverTimestamp(),
+      // 2. Create Order on Backend
+      // NOTE: Change to http://localhost:5000 if testing locally
+      const response = await fetch('http://localhost:5000/api/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: calculateCost() }),
+      });
+      
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error || 'Failed to create order');
+
+      // 3. Open Razorpay Checkout Popup
+      const options = {
+        key: 'rzp_test_TtCSBKsXjrWEX5', // 🔥 REPLACE WITH YOUR ACTUAL RAZORPAY KEY ID
+        amount: data.order.amount,
+        currency: "INR",
+        name: "EcoChargeHub",
+        description: `Charging at ${station?.name}`,
+        order_id: data.order.id,
+        handler: async function (response) {
+          try {
+            // 4. Verify Payment on Backend
+            const verifyRes = await fetch('http://localhost:5000/api/verify-payment', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              }),
+            });
+            const verifyData = await verifyRes.json();
+
+            if (verifyData.success) {
+              // 5. Save Booking to Firestore
+              await addDoc(collection(db, 'bookings'), {
+                userId: user.uid,
+                userEmail: user.email,
+                userName: user.displayName || 'User',
+                stationId: stationId,
+                stationName: station?.name || 'Station',
+                chargerId: selectedCharger,
+                chargerType: selectedChargerData?.type || 'CCS',
+                date: selectedDate,
+                startTime: startTime,
+                endTime: endTime,
+                duration: Number(calculateHours().toFixed(2)),
+                estimatedCost: calculateCost(),
+                paymentId: response.razorpay_payment_id,
+                status: 'confirmed',
+                createdAt: serverTimestamp(),
+              });
+              setPaymentSuccess(true);
+            } else {
+              setError('Payment verification failed. Please contact support.');
+            }
+          } catch (err) {
+            setError('Verification error: ' + err.message);
+          }
+        },
+        prefill: {
+          name: user.displayName || 'User',
+          email: user.email,
+        },
+        theme: { color: "#238636" },
       };
 
-      await addDoc(collection(db, 'bookings'), bookingData);
-
-      alert('✅ Booking confirmed successfully!');
-      navigate('/history');
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+      
     } catch (err) {
-      console.error('Booking error:', err);
-      setError(err.message || 'Failed to create booking');
+      setError(err.message || 'Payment failed. Please try again.');
+    } finally {
+      setIsProcessingPayment(false);
     }
-    setLoading(false);
   };
 
-  // ============================================================
-  // LOGIN REQUIRED SCREEN
-  // ============================================================
-  if (!user) {
-    return (
-      <div className="booking-page">
-        <div className="container" style={{ padding: '80px 20px', textAlign: 'center' }}>
-          <div className="login-required">
-            <FaBan className="lock-icon" />
-            <h2>Login Required</h2>
-            <p>You need to login to book a charging slot.</p>
-            <Link to="/login" className="btn btn-primary">Login Now</Link>
-          </div>
-        </div>
-        <style jsx>{`
-          .booking-page { min-height: 100vh; background: var(--bg); }
-          .login-required {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            padding: 60px 40px;
-            max-width: 500px;
-            margin: 0 auto;
-            box-shadow: var(--shadow-lg);
-          }
-          .lock-icon {
-            font-size: 60px;
-            color: var(--status-unavailable);
-            margin-bottom: 20px;
-          }
-          .login-required h2 {
-            color: var(--text);
-            margin-bottom: 12px;
-            font-weight: 800;
-          }
-          .login-required p {
-            color: var(--text-muted);
-            margin-bottom: 24px;
-          }
-        `}</style>
-      </div>
-    );
-  }
+  if (!user) return <div className="container" style={{ padding: '40px', textAlign: 'center' }}><h2>Please login first.</h2></div>;
+  if (paymentSuccess) return <div className="container" style={{ padding: '40px', textAlign: 'center' }}><FaCheckCircle size={50} color="var(--primary)" /><h2>Payment Confirmed!</h2></div>;
 
-  // ============================================================
-  // MAIN BOOKING UI
-  // ============================================================
   return (
-    <div className="booking-page">
-      <div className="container" style={{ padding: '40px 20px' }}>
-        <Link to={`/stations/${stationId}`} className="back-link">
-          <FaArrowLeft /> Back to Station
-        </Link>
+    <div className="booking-page" style={{ padding: '40px 20px', background: 'var(--bg)', minHeight: '100vh' }}>
+      <div className="container" style={{ maxWidth: '800px', margin: '0 auto' }}>
+        <h1 style={{ textAlign: 'center', marginBottom: '20px', color: 'var(--text)' }}>Book Charging Slot</h1>
+        
+        {error && <div style={{ background: '#fee2e2', color: '#dc2626', padding: '15px', marginBottom: '20px', borderRadius: '8px', borderLeft: '4px solid #dc2626' }}>{error}</div>}
 
-        <h1 className="page-title">Book Charging Slot</h1>
-        <p className="page-subtitle">
-          {station?.name || 'Charging Station'} — {station?.city || ''}
-        </p>
-
-        {error && <div className="error-message">{error}</div>}
-
-        <form onSubmit={handleBooking} className="booking-form">
-          {/* ============ STEP 1: SELECT CHARGER ============ */}
-          <div className="form-section">
-            <h3 className="section-label">
-              <span className="step-badge">1</span> Select Charger
-            </h3>
-            <div className="charger-grid">
-              {chargers.map((charger) => (
+        <form onSubmit={handleBooking} style={{ background: 'var(--surface)', padding: '30px', borderRadius: '15px', border: '1px solid var(--border)' }}>
+          
+          {/* CHARGER */}
+          <div style={{ marginBottom: '30px' }}>
+            <h3 style={{ marginBottom: '15px', color: 'var(--text)' }}>1. Select Charger</h3>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              {chargers.map((c) => (
                 <button
                   type="button"
-                  key={charger.id}
-                  className={`charger-option ${
-                    selectedCharger === charger.id ? 'selected' : ''
-                  } ${charger.status !== 'available' ? 'disabled' : ''}`}
-                  onClick={() =>
-                    charger.status === 'available' && handleChargerSelect(charger.id)
-                  }
-                  disabled={charger.status !== 'available'}
+                  key={c.id}
+                  onClick={() => { setSelectedCharger(c.id); setSelectedChargerData(c); }}
+                  style={{ padding: '15px', border: selectedCharger === c.id ? '2px solid var(--primary)' : '2px solid var(--border)', background: selectedCharger === c.id ? 'var(--primary-light)' : 'transparent', borderRadius: '10px', flex: '1', minWidth: '150px', cursor: 'pointer' }}
                 >
-                  <FaChargingStation className="charger-icon" />
-                  <div className="charger-info">
-                    <span className="charger-type">{charger.type}</span>
-                    <span className="charger-meta">
-                      {charger.power} • {charger.pricePerKwh}
-                    </span>
-                    <span className={`charger-status ${charger.status}`}>
-                      {charger.status}
-                    </span>
-                  </div>
+                  <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>{c.type}</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{c.power} • {c.pricePerKwh || `₹${station?.pricePerKwh}`}/kWh</div>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* ============ STEP 2: SELECT DATE ============ */}
-          {selectedCharger && (
-            <div className="form-section">
-              <h3 className="section-label">
-                <span className="step-badge">2</span> Select Date
-              </h3>
-              <input
-                type="date"
-                value={selectedDate}
-                min={getTodayString()}
-                onChange={(e) => {
-                  setSelectedDate(e.target.value);
-                  setSelectedSlot(null);
-                }}
-                className="date-input"
-                required
-              />
-            </div>
-          )}
+          {/* DATE */}
+          <div style={{ marginBottom: '30px' }}>
+            <h3 style={{ marginBottom: '15px', color: 'var(--text)' }}>2. Select Date</h3>
+            <input 
+              type="date" 
+              value={selectedDate} 
+              min={getTodayString()}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: '16px' }}
+            />
+          </div>
 
-          {/* ============ STEP 3: SELECT TIME SLOT ============ */}
+          {/* TIME SLOT GRID */}
           {selectedCharger && selectedDate && (
-            <div className="form-section">
-              <h3 className="section-label">
-                <span className="step-badge">3</span> Select Time Slot
-              </h3>
+            <div style={{ marginBottom: '30px' }}>
+              <h3 style={{ marginBottom: '15px', color: 'var(--text)' }}>3. Check Availability & Select Start Time</h3>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '10px' }}>
+                {timeSlots.map((slot, index) => {
+                  const blocked = isBlockBooked(slot.start, slot.end);
+                  const past = isSlotPast(slot.start);
+                  const isSelected = startTime === slot.start;
 
-              {loadingSlots ? (
-                <div className="loading-slots">
-                  <FaSpinner className="spinning" /> Loading available slots...
-                </div>
-              ) : (
-                <>
-                  <div className="slots-legend">
-                    <span className="legend-item">
-                      <span className="legend-dot available"></span> Available
-                    </span>
-                    <span className="legend-item">
-                      <span className="legend-dot booked"></span> Booked
-                    </span>
-                    <span className="legend-item">
-                      <span className="legend-dot selected"></span> Selected
-                    </span>
-                    <span className="legend-item">
-                      <span className="legend-dot past"></span> Past
-                    </span>
-                  </div>
+                  let bg = 'var(--surface)';
+                  let border = '1px solid var(--border)';
+                  let color = 'var(--text)';
 
-                  <div className="slots-grid">
-                    {timeSlots.map((slot, index) => {
-                      const blocked = isSlotBlocked(
-                        slot.start,
-                        slot.end,
-                        existingBookings,
-                        selectedDate
-                      );
-                      const past = isPastSlot(slot.start, selectedDate);
-                      const isSelected =
-                        selectedSlot?.start === slot.start &&
-                        selectedSlot?.end === slot.end;
+                  if (isSelected) {
+                    bg = 'var(--primary)';
+                    color = 'white';
+                    border = '2px solid var(--primary)';
+                  } else if (blocked) {
+                    bg = 'var(--status-unavailable-bg)';
+                    color = 'var(--status-unavailable)';
+                  } else if (past) {
+                    bg = 'var(--bg-hover)';
+                    color = 'var(--text-muted)';
+                  }
 
-                      let statusClass = 'available';
-                      if (blocked) statusClass = 'booked';
-                      else if (past) statusClass = 'past';
-                      else if (isSelected) statusClass = 'selected';
-
-                      return (
-                        <button
-                          type="button"
-                          key={index}
-                          className={`slot-btn ${statusClass}`}
-                          onClick={() =>
-                            !blocked && !past && handleSlotSelect(slot)
-                          }
-                          disabled={blocked || past}
-                        >
-                          <span className="slot-label">{slot.label}</span>
-                          {blocked && <span className="slot-status">Booked</span>}
-                          {past && <span className="slot-status">Past</span>}
-                          {isSelected && <FaCheckCircle className="slot-check" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
+                  return (
+                    <button
+                      type="button"
+                      key={index}
+                      disabled={blocked || past}
+                      onClick={() => {
+                        setStartTime(slot.start);
+                        const [h] = slot.start.split(':').map(Number);
+                        setEndTime(`${(h + 1).toString().padStart(2, '0')}:00`);
+                      }}
+                      style={{ padding: '12px 10px', borderRadius: '8px', background: bg, color: color, border: border, opacity: (blocked || past) ? 0.6 : 1, cursor: (blocked || past) ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}
+                    >
+                      {slot.label}
+                      {blocked && <span style={{ display: 'block', fontSize: '10px', marginTop: '4px' }}>Booked</span>}
+                      {past && <span style={{ display: 'block', fontSize: '10px', marginTop: '4px' }}>Past</span>}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
-          {/* ============ STEP 4: SUMMARY ============ */}
-          {selectedSlot && (
-            <div className="form-section">
-              <h3 className="section-label">
-                <span className="step-badge">4</span> Booking Summary
-              </h3>
-              <div className="summary-card">
-                <div className="summary-row">
-                  <FaChargingStation className="summary-icon" />
-                  <span>
-                    Charger: <strong>{selectedChargerData?.type}</strong>
-                  </span>
+          {/* EXACT TIME PICKERS */}
+          {startTime && (
+            <div style={{ marginBottom: '30px', padding: '20px', background: 'var(--bg)', borderRadius: '10px', border: '1px dashed var(--primary)' }}>
+              <h3 style={{ marginBottom: '15px', color: 'var(--text)' }}>4. Choose Exact Time</h3>
+              <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+                <div style={{ flex: '1', minWidth: '200px' }}>
+                  <label style={{ display: 'block', marginBottom: '5px', color: 'var(--text-muted)', fontSize: '14px' }}>Start Time</label>
+                  <input 
+                    type="time" 
+                    value={startTime}
+                    onChange={(e) => setStartTime(e.target.value)}
+                    style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: '16px' }}
+                  />
                 </div>
-                <div className="summary-row">
-                  <FaCalendarAlt className="summary-icon" />
-                  <span>
-                    Date: <strong>{selectedDate}</strong>
-                  </span>
-                </div>
-                <div className="summary-row">
-                  <FaClock className="summary-icon" />
-                  <span>
-                    Time: <strong>{selectedSlot.label}</strong>
-                  </span>
-                </div>
-                <div className="summary-row total">
-                  <FaWallet className="summary-icon" />
-                  <span>
-                    Estimated Cost: <strong>₹{calculateCost()}</strong>
-                  </span>
+                <div style={{ flex: '1', minWidth: '200px' }}>
+                  <label style={{ display: 'block', marginBottom: '5px', color: 'var(--text-muted)', fontSize: '14px' }}>End Time</label>
+                  <input 
+                    type="time" 
+                    value={endTime}
+                    onChange={(e) => setEndTime(e.target.value)}
+                    style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: '16px' }}
+                  />
                 </div>
               </div>
             </div>
           )}
 
-          {/* ============ SUBMIT ============ */}
-          {selectedSlot && (
-            <button
-              type="submit"
-              className="btn btn-primary btn-full"
-              disabled={loading}
-            >
-              {loading ? 'Booking...' : '✅ Confirm Booking'}
-            </button>
+          {/* SUMMARY */}
+          {startTime && endTime && calculateHours() > 0 && (
+            <div style={{ background: 'var(--primary-light)', padding: '20px', borderRadius: '10px', marginBottom: '20px' }}>
+              <h4 style={{ marginBottom: '10px', color: 'var(--text)' }}>Booking Summary</h4>
+              <p style={{ color: 'var(--text)' }}>Time: <strong>{startTime} to {endTime}</strong></p>
+              <p style={{ color: 'var(--text)' }}>Duration: <strong>{calculateHours().toFixed(2)} Hours</strong></p>
+              <p style={{ color: 'var(--primary)', fontSize: '24px', fontWeight: 'bold', marginTop: '10px' }}>Total: ₹{calculateCost()}</p>
+            </div>
           )}
+
+          <button 
+            type="submit" 
+            disabled={isProcessingPayment || !startTime || !endTime || calculateHours() <= 0}
+            style={{ width: '100%', padding: '16px', background: 'var(--primary)', color: 'white', fontWeight: 'bold', borderRadius: '10px', border: 'none', cursor: 'pointer', fontSize: '18px', opacity: (!startTime || !endTime || calculateHours() <= 0 || isProcessingPayment) ? 0.5 : 1 }}
+          >
+            {isProcessingPayment ? 'Processing...' : `Pay ₹${calculateCost()} & Confirm`}
+          </button>
         </form>
       </div>
-
-      <style jsx>{`
-        .booking-page {
-          padding: 20px 0;
-          min-height: 100vh;
-          background: var(--bg);
-        }
-
-        .back-link {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          color: var(--primary);
-          text-decoration: none;
-          margin-bottom: 20px;
-          font-weight: 600;
-          font-size: 14px;
-        }
-        .back-link:hover {
-          text-decoration: underline;
-        }
-
-        .page-title {
-          text-align: center;
-          font-size: 32px;
-          color: var(--text);
-          margin-bottom: 8px;
-          font-weight: 800;
-          letter-spacing: -0.02em;
-        }
-        .page-subtitle {
-          text-align: center;
-          color: var(--text-muted);
-          margin-bottom: 32px;
-          font-size: 15px;
-        }
-
-        .booking-form {
-          max-width: 720px;
-          margin: 0 auto;
-          background: var(--surface);
-          padding: 32px;
-          border-radius: 20px;
-          border: 1px solid var(--border);
-          box-shadow: var(--shadow-xl);
-        }
-
-        .form-section {
-          margin-bottom: 28px;
-          padding-bottom: 24px;
-          border-bottom: 1px solid var(--border);
-        }
-        .form-section:last-of-type {
-          border-bottom: none;
-        }
-
-        .section-label {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          font-size: 16px;
-          font-weight: 700;
-          color: var(--text);
-          margin-bottom: 16px;
-        }
-        .step-badge {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 28px;
-          height: 28px;
-          background: var(--primary);
-          color: white;
-          border-radius: 50%;
-          font-size: 14px;
-          font-weight: 700;
-        }
-
-        .charger-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-          gap: 12px;
-        }
-        .charger-option {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 16px;
-          background: var(--bg);
-          border: 2px solid var(--border);
-          border-radius: 14px;
-          cursor: pointer;
-          transition: all 0.2s;
-          text-align: left;
-          font-family: inherit;
-        }
-        .charger-option:hover:not(.disabled) {
-          border-color: var(--primary);
-          transform: translateY(-2px);
-        }
-        .charger-option.selected {
-          border-color: var(--primary);
-          background: var(--primary-light);
-          box-shadow: 0 0 0 3px rgba(35, 134, 54, 0.15);
-        }
-        .charger-option.disabled {
-          opacity: 0.4;
-          cursor: not-allowed;
-        }
-        .charger-icon {
-          font-size: 28px;
-          color: var(--primary);
-          flex-shrink: 0;
-        }
-        .charger-info {
-          display: flex;
-          flex-direction: column;
-          gap: 3px;
-          flex: 1;
-        }
-        .charger-type {
-          font-size: 15px;
-          font-weight: 700;
-          color: var(--text);
-        }
-        .charger-meta {
-          font-size: 12px;
-          color: var(--text-muted);
-        }
-        .charger-status {
-          font-size: 10px;
-          font-weight: 700;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          margin-top: 4px;
-          padding: 2px 8px;
-          border-radius: 10px;
-          width: fit-content;
-        }
-        .charger-status.available {
-          background: var(--status-available-bg);
-          color: var(--status-available);
-        }
-        .charger-status.occupied,
-        .charger-status.maintenance {
-          background: var(--status-unavailable-bg);
-          color: var(--status-unavailable);
-        }
-
-        .date-input {
-          width: 100%;
-          padding: 14px 16px;
-          border: 2px solid var(--border);
-          border-radius: 12px;
-          font-size: 15px;
-          background: var(--surface);
-          color: var(--text);
-          font-family: inherit;
-          transition: all 0.2s;
-        }
-        .date-input:focus {
-          border-color: var(--primary);
-          outline: none;
-          box-shadow: 0 0 0 3px rgba(35, 134, 54, 0.1);
-        }
-
-        .slots-legend {
-          display: flex;
-          gap: 20px;
-          flex-wrap: wrap;
-          margin-bottom: 16px;
-          padding: 12px 16px;
-          background: var(--bg);
-          border-radius: 10px;
-          font-size: 12px;
-          color: var(--text-muted);
-        }
-        .legend-item {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-        .legend-dot {
-          width: 12px;
-          height: 12px;
-          border-radius: 4px;
-        }
-        .legend-dot.available {
-          background: var(--status-available-bg);
-          border: 1px solid var(--status-available);
-        }
-        .legend-dot.booked {
-          background: var(--status-unavailable-bg);
-          border: 1px solid var(--status-unavailable);
-        }
-        .legend-dot.selected {
-          background: var(--primary);
-        }
-        .legend-dot.past {
-          background: var(--bg-hover);
-          border: 1px solid var(--border-strong);
-        }
-
-        .slots-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-          gap: 10px;
-        }
-        .slot-btn {
-          position: relative;
-          padding: 14px 12px;
-          border: 2px solid var(--border);
-          border-radius: 12px;
-          background: var(--surface);
-          cursor: pointer;
-          transition: all 0.2s;
-          font-family: inherit;
-          font-size: 13px;
-          font-weight: 600;
-          color: var(--text);
-          text-align: center;
-        }
-        .slot-btn.available:hover {
-          border-color: var(--primary);
-          background: var(--primary-light);
-          color: var(--primary);
-          transform: translateY(-2px);
-        }
-        .slot-btn.selected {
-          border-color: var(--primary);
-          background: var(--primary);
-          color: white;
-          box-shadow: 0 4px 12px rgba(35, 134, 54, 0.3);
-        }
-        .slot-btn.booked {
-          background: var(--status-unavailable-bg);
-          color: var(--status-unavailable);
-          border-color: var(--status-unavailable);
-          cursor: not-allowed;
-          opacity: 0.85;
-        }
-        .slot-btn.past {
-          background: var(--bg-hover);
-          color: var(--text-muted);
-          cursor: not-allowed;
-          opacity: 0.6;
-        }
-        .slot-label {
-          display: block;
-        }
-        .slot-status {
-          display: block;
-          font-size: 10px;
-          font-weight: 700;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          margin-top: 4px;
-        }
-        .slot-check {
-          position: absolute;
-          top: 6px;
-          right: 6px;
-          font-size: 12px;
-        }
-
-        .loading-slots {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 10px;
-          padding: 40px;
-          color: var(--text-muted);
-          font-size: 14px;
-        }
-        .spinning {
-          animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-
-        .summary-card {
-          background: var(--primary-light);
-          border: 1px solid var(--border);
-          border-radius: 14px;
-          padding: 20px;
-        }
-        .summary-row {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 8px 0;
-          color: var(--text);
-          font-size: 14px;
-        }
-        .summary-row + .summary-row {
-          border-top: 1px dashed var(--border);
-        }
-        .summary-row.total {
-          font-weight: 700;
-          color: var(--primary);
-          font-size: 16px;
-          margin-top: 6px;
-        }
-        .summary-icon {
-          color: var(--primary);
-          font-size: 16px;
-          flex-shrink: 0;
-        }
-
-        .error-message {
-          background: var(--status-unavailable-bg);
-          color: var(--status-unavailable);
-          padding: 14px 16px;
-          border-radius: 10px;
-          margin-bottom: 20px;
-          border-left: 4px solid var(--status-unavailable);
-          font-size: 14px;
-          font-weight: 500;
-        }
-
-        .btn-full {
-          width: 100%;
-          padding: 16px;
-          font-size: 16px;
-          font-weight: 700;
-        }
-
-        @media (max-width: 768px) {
-          .booking-form {
-            padding: 20px;
-          }
-          .charger-grid {
-            grid-template-columns: 1fr;
-          }
-          .slots-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
-          .page-title {
-            font-size: 24px;
-          }
-          .slots-legend {
-            gap: 12px;
-            font-size: 11px;
-          }
-        }
-      `}</style>
     </div>
   );
 };

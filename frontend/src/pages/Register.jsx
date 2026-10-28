@@ -3,9 +3,12 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   FaUser, FaEnvelope, FaLock, FaPhone, FaCar, FaChargingStation
 } from 'react-icons/fa';
-import { useAuth } from '../context/AuthContext';
-import { db } from '../firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { auth } from '../firebase'; 
+import { 
+  createUserWithEmailAndPassword, 
+  sendEmailVerification, 
+  updateProfile 
+} from 'firebase/auth';
 
 const Register = () => {
   const [formData, setFormData] = useState({
@@ -19,7 +22,6 @@ const Register = () => {
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { register } = useAuth();
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -43,34 +45,31 @@ const Register = () => {
     setLoading(true);
 
     try {
-      // Register with Firebase Auth
-      const user = await register(formData.email, formData.password, formData.name);
-
-      // ⚠️ IMPORTANT: Always save with the role user selected
-      // Only 'user' or 'owner' allowed (never 'admin' via registration)
-      const safeRole = formData.role === 'owner' ? 'owner' : 'user';
-
-      await setDoc(doc(db, 'users', user.uid), {
-        name: formData.name,
-        email: formData.email,
-        phone: formData.phone || '',
-        vehicleModel: formData.vehicle || '',
-        role: safeRole,
-        createdAt: new Date().toISOString()
-      });
-
-      alert(
-        `✅ Registration successful! Welcome ${
-          safeRole === 'owner' ? 'Station Owner' : 'User'
-        }!`
+      // 1. Create the user in Firebase Auth
+      const userCredential = await createUserWithEmailAndPassword(
+        auth, 
+        formData.email, 
+        formData.password
       );
+      const user = userCredential.user;
 
-      // Redirect based on role
-      if (safeRole === 'owner') {
-        navigate('/owner');
-      } else {
-        navigate('/dashboard');
-      }
+      // 2. Update their profile with their name
+      await updateProfile(user, { displayName: formData.name });
+
+      // 3. Send the Verification Email
+      await sendEmailVerification(user);
+
+      // 4. Save the role and extra data temporarily so we can save it AFTER verification
+      const safeRole = formData.role === 'owner' ? 'owner' : 'user';
+      localStorage.setItem('pendingRole', safeRole);
+      localStorage.setItem('pendingPhone', formData.phone || '');
+      localStorage.setItem('pendingVehicle', formData.vehicle || '');
+
+      // 5. Alert and redirect to the verification waiting page
+      alert(`✅ Registration successful! \n\nWe have sent a verification link to ${formData.email}. Please check your inbox and click the link to activate your account.`);
+      
+      navigate('/verify-email'); 
+
     } catch (error) {
       setError(error.message || 'Failed to create account');
     }
@@ -156,7 +155,6 @@ const Register = () => {
             />
           </div>
 
-          {/* Role selection */}
           <div className="form-group role-selection">
             <label>Register as:</label>
             <div className="role-options">
@@ -172,9 +170,10 @@ const Register = () => {
                   checked={formData.role === 'user'}
                   onChange={handleChange}
                 />
-                <FaUser /> User
-                <span className="role-desc">Book charging stations</span>
+                <FaUser /> EV User
+                <span className="role-desc">Book charging slots</span>
               </label>
+              
               <label
                 className={`role-option ${
                   formData.role === 'owner' ? 'selected' : ''
@@ -187,8 +186,8 @@ const Register = () => {
                   checked={formData.role === 'owner'}
                   onChange={handleChange}
                 />
-                <FaChargingStation /> Station Owner
-                <span className="role-desc">Manage charging stations</span>
+                <FaChargingStation /> Host / Owner
+                <span className="role-desc">List your station or home charger</span>
               </label>
             </div>
           </div>
@@ -207,7 +206,7 @@ const Register = () => {
         </p>
       </div>
 
-      <style jsx>{`
+      <style>{`
         .auth-page {
           display: flex;
           justify-content: center;
@@ -306,6 +305,17 @@ const Register = () => {
         .auth-footer a {
           color: var(--primary);
           font-weight: 600;
+        }
+        .error-message {
+          background: #f8d7da;
+          color: #721c24;
+          padding: 12px 16px;
+          border-radius: 10px;
+          margin-bottom: 20px;
+          border-left: 4px solid #dc3545;
+          font-size: 13px;
+          font-weight: 500;
+          line-height: 1.5;
         }
         @media (max-width: 480px) {
           .role-options {
